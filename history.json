@@ -1,0 +1,32 @@
+[
+  {
+    "id": "4d2bbc08-957e-469b-9c5b-8f4b51fc515a",
+    "from": "phone",
+    "type": "text",
+    "text": "hello",
+    "time": "21:18"
+  },
+  {
+    "id": "7c4e2436-c5d8-4344-a7da-b2bdb525f784",
+    "from": "laptop",
+    "type": "text",
+    "text": "hi",
+    "time": "21:59"
+  },
+  {
+    "id": "05f9a9bc-9432-4b05-a2ad-bc6ca7698e3e",
+    "from": "laptop",
+    "type": "file",
+    "name": "My_20CV.docx",
+    "size": "13.77 KB",
+    "time": "22:00"
+  },
+  {
+    "id": "110c4b49-7bab-4d17-b895-436f6611dbde",
+    "from": "phone",
+    "type": "file",
+    "name": "IMG_20261006_070906_635.jpg",
+    "size": "3.56 MB",
+    "time": "22:00"
+  }
+]
