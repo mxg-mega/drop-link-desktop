@@ -5,3 +5,5 @@ jinja2
 qrcode[pil]
 platformdirs
 pystray
+zeroconf
+pytest

@@ -1,18 +1,29 @@
 """Builds the FastAPI app and wires routers together."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import presence
+from . import discovery, presence
 from .config import APP_NAME, STATIC_DIR, settings
 from .network import is_local_client
 from .routes import items, pages, system
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    discovery.start_advertising(settings.port)
+    yield
+    # Shutdown
+    discovery.stop_advertising()
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title=APP_NAME)
+    app = FastAPI(title=APP_NAME, lifespan=lifespan)
 
     if settings.cors:
         app.add_middleware(

@@ -110,6 +110,8 @@
       .lb .lbbtns{display:flex;gap:10px}
       .lb a,.lb button{background:#fff;color:#12202B;border-radius:12px;padding:10px 16px;font-weight:600;text-decoration:none;display:inline-flex;gap:8px;align-items:center}
       .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:99px;font-size:13px;font-weight:500;z-index:50}
+      .banner{position:fixed;top:0;left:0;right:0;background:var(--danger);color:#fff;padding:8px;text-align:center;font-size:13px;font-weight:500;z-index:60;display:none}
+      .banner.show{display:block}
 
       @media (max-width:820px){
         .app{grid-template-columns:1fr}
@@ -207,6 +209,7 @@
     </div>
 
     <div class="drop" id="drop"><div>Drop to send to phone</div></div>
+    <div class="banner" id="unreachableBanner">Server unreachable, showing saved copy</div>
 
     <script>
       {% raw %}
@@ -277,7 +280,7 @@
         }
 
         // ---- state ----
-        const state = { items: [], pending: [], filter: 'all', online: false, sig: null, stick: true };
+        const state = { items: [], pending: [], filter: 'all', online: false, sig: null, stick: true, latestSeq: 0, phoneCursorSeq: null, phoneOnline: false };
         let seq = 0;
 
         function visible() {
@@ -312,10 +315,18 @@
               h('div', null, h('b', null, i.name), h('small', null, i.size)));
           }
 
+          // Delivery state for laptop-origin items
+          let deliveryHint = null;
+          if (mine && i.seq) {
+            const waiting = state.phoneCursorSeq === null || i.seq > state.phoneCursorSeq;
+            deliveryHint = h('small', { style: 'display:block;margin-top:4px;color:var(--mute);font-size:11px' },
+              waiting ? 'Waiting for phone…' : 'Delivered');
+          }
+
           const bubble = h('div', {
             class: 'bubble ' + i.from + (i.type === 'text' ? ' click' : ''),
             onclick: () => { if (i.type === 'text') copy(i.text); },
-          }, body);
+          }, [body, deliveryHint].filter(Boolean));
 
           const acts = h('div', { class: 'acts' },
             (i.type === 'text' || i.type === 'link') && h('button', { class: 'ab', title: 'Copy', 'aria-label': 'Copy', onclick: () => copy(i.text) }, icon('copy')),
@@ -370,7 +381,7 @@
           const on = state.online;
           document.querySelectorAll('.dot').forEach((d) => d.classList.toggle('off', !on));
           $('#statusText').textContent = on ? 'Server running' : 'Server unreachable';
-          $('#pillText').textContent = on ? 'Live' : 'Offline';
+          $('#pillText').textContent = state.phoneOnline ? 'Phone connected' : 'Waiting for phone';
         }
 
         function lightbox(i) {
@@ -389,12 +400,96 @@
         async function refresh() {
           if (document.hidden) return;
           try {
-            const { history } = await (await api('/history')).json();
+            // Use sync endpoint with latestSeq
+            const resp = await api('/sync?after=' + state.latestSeq);
+            const data = await resp.json();
             state.online = true;
-            const sig = history.map((i) => i.id).join(',');
-            if (sig !== state.sig) { state.sig = sig; state.items = history; render(); }
-          } catch (e) { state.online = false; }
+            $('#unreachableBanner').classList.remove('show');
+            
+            if (data.full_resync) {
+              // Full resync: replace everything
+              state.items = data.items;
+            } else {
+              // Incremental: merge by id, remove deleted
+              const existingIds = new Set(state.items.map(i => i.id));
+              data.items.forEach(i => {
+                const idx = state.items.findIndex(x => x.id === i.id);
+                if (idx >= 0) {
+                  state.items[idx] = i;
+                } else {
+                  state.items.push(i);
+                }
+              });
+              // Remove deleted items
+              if (data.deleted && data.deleted.length) {
+                state.items = state.items.filter(i => !data.deleted.includes(i.id));
+              }
+            }
+            
+            state.latestSeq = data.latest_seq;
+            state.sig = state.items.map((i) => i.id).join(',');
+            saveState();
+            render();
+          } catch (e) { 
+            state.online = false;
+            // Try to load from localStorage if server unreachable
+            if (!state.items.length) {
+              loadState();
+              if (state.items.length) {
+                render();
+                $('#unreachableBanner').classList.add('show');
+              }
+            }
+          }
           renderStatus();
+        }
+
+        async function updatePing() {
+          try {
+            const data = await (await api('/ping')).json();
+            state.phoneOnline = data.phone_online;
+            state.phoneCursorSeq = data.phone_cursor_seq;
+            renderStatus();
+            render(); // Re-render to update delivery states
+          } catch (e) {
+            // Ignore ping errors
+          }
+        }
+
+        function saveState() {
+          try {
+            const toSave = { items: state.items, latestSeq: state.latestSeq };
+            localStorage.setItem('droplink_state', JSON.stringify(toSave));
+          } catch (e) {
+            // localStorage might be disabled or full
+          }
+        }
+
+        function loadState() {
+          try {
+            const saved = localStorage.getItem('droplink_state');
+            if (saved) {
+              const data = JSON.parse(saved);
+              if (data.items && Array.isArray(data.items)) {
+                state.items = data.items;
+                state.latestSeq = data.latestSeq || 0;
+              }
+            }
+          } catch (e) {
+            // Invalid or no saved state
+          }
+        }
+
+        // Simple UUID v4 generator (for non-secure contexts)
+        function generateUUID() {
+          if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            return crypto.randomUUID();
+          }
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
         }
 
         async function remove(i) {
@@ -412,6 +507,7 @@
           const body = new FormData();
           body.append('text', text);
           body.append('origin', 'laptop');
+          body.append('client_id', generateUUID());
           try { await api('/text', { method: 'POST', body }); state.stick = true; refresh(); }
           catch (e) { input.value = text; sizeInput(); toast('Could not send. Is the server running?'); }
         }
@@ -424,6 +520,7 @@
           const fd = new FormData();
           fd.append('file', file, job.name);
           fd.append('origin', 'laptop');
+          fd.append('client_id', generateUUID());
           const xhr = new XMLHttpRequest();
           xhr.open('POST', '/upload');
           xhr.upload.onprogress = (e) => {
@@ -505,10 +602,13 @@
         document.querySelectorAll('[data-icon]').forEach((el) => el.append(icon(el.dataset.icon, el.id === 'sendBtn' ? 19 : 20)));
 
         // ---- go ----
+        loadState();
         render();
         renderStatus();
         refresh();
+        updatePing();
         setInterval(refresh, 2000);
+        setInterval(updatePing, 3000);
         document.addEventListener('visibilitychange', refresh);
       })();
       {% endraw %}
